@@ -169,6 +169,8 @@ function voiceScore(v) {
   } else if (name.includes("alina") || name.includes("emil")) {
     score += 25;
   }
+  // voci de calitate superioară (iPhone/Mac: "Enhanced"/"Premium", descărcate din Setări)
+  if (/enhanced|premium|îmbunătățit|imbunatatit|neural|natural/i.test(v.name)) score += 60;
   if (!v.localService) score += 2; // vocile online sună de obicei mai natural
   return score;
 }
@@ -274,8 +276,9 @@ async function speak(text) {
     currentUtterance = utter;
     utter.lang = chosenVoice ? chosenVoice.lang : LANG;
     if (chosenVoice) utter.voice = chosenVoice;
-    utter.rate = 1.05;
-    utter.pitch = 1.15;
+    // ton și viteză naturale — orice abatere face vocea să sune mai robotic
+    utter.rate = 1;
+    utter.pitch = 1;
     utter.volume = 1;
 
     let started = false;
