@@ -532,69 +532,172 @@ async function postJSON(url, headers, body) {
   }
 }
 
+async function getJSON(url, headers) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { headers, signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(data?.error?.message || res.statusText, res.status, data?.error?.code);
+    return data;
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError("Fără conexiune la serverul AI", 0, "NETWORK");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const isModelMissing = (err) =>
-  err.status === 404 || /model.*(not found|not exist|decommission|deprecated)/i.test(err.message);
+  err.status === 404 ||
+  /model.*(not found|not exist|does not exist|decommission|deprecated|not supported|no longer)/i.test(err.message);
 
-async function callGemini(key, messages) {
-  let lastErr;
-  for (const model of GEMINI_MODELS) {
-    const generationConfig = { temperature: 0.9, maxOutputTokens: 300 };
-    // modelele 2.5 "gândesc" implicit — oprim asta ca răspunsul să vină repede
-    if (model.startsWith("gemini-2.5")) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+/* ---------- Alegerea automată a modelului ----------
+   Furnizorii retrag modele des. În loc de nume fixe, cerem lista de
+   modele disponibile pentru cheia ta și îl alegem pe cel mai potrivit.
+   Modelul care a mers se ține minte în localStorage. */
 
+const discoveredModels = {}; // provider -> listă ordonată (doar în sesiunea curentă)
+let lastModelUsed = "";
+
+function rankBy(ids, preferences) {
+  const score = (id) => {
+    const i = preferences.findIndex((re) => re.test(id));
+    return i === -1 ? preferences.length : i;
+  };
+  return [...ids].sort((a, b) => score(a) - score(b));
+}
+
+const GROQ_EXCLUDE = /whisper|tts|guard|playai|orpheus|distil|compound|embed|allam|saba/i;
+const GROQ_PREFERENCE = [
+  /llama-3\.3-70b/i, /llama-4-maverick/i, /llama-4-scout/i, /kimi-k2/i,
+  /gpt-oss-120b/i, /gpt-oss-20b/i, /qwen/i, /llama/i,
+];
+
+async function discoverGroqModels(key) {
+  const data = await getJSON("https://api.groq.com/openai/v1/models", { Authorization: `Bearer ${key}` });
+  const ids = (data?.data || [])
+    .filter((m) => m.active !== false && m.id && !GROQ_EXCLUDE.test(m.id))
+    .map((m) => m.id);
+  return rankBy(ids, GROQ_PREFERENCE);
+}
+
+const GEMINI_EXCLUDE = /image|tts|audio|live|embed|vision|robotics|computer-use|learnlm|gemma|aqa|exp-\d|native/i;
+
+function geminiRank(id) {
+  const version = parseFloat((id.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || "0");
+  let tier = 3;
+  if (id === "gemini-flash-latest") tier = 1;
+  else if (/flash$/.test(id)) tier = 0;              // stabil, ex. gemini-2.5-flash
+  else if (/flash-lite$/.test(id)) tier = 2;
+  else if (/flash/.test(id)) tier = 4;              // preview-uri
+  else tier = 6;
+  return tier * 100 - version;
+}
+
+async function discoverGeminiModels(key) {
+  const data = await getJSON("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
+    "x-goog-api-key": key,
+  });
+  const ids = (data?.models || [])
+    .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map((m) => (m.name || "").replace(/^models\//, ""))
+    .filter((id) => id.startsWith("gemini") && !GEMINI_EXCLUDE.test(id));
+  return ids.sort((a, b) => geminiRank(a) - geminiRank(b));
+}
+
+async function candidateModels(provider, key, refresh = false) {
+  const saved = lsGet(`ai_model_${provider}`);
+  const fallback = provider === "groq" ? GROQ_MODELS : GEMINI_MODELS;
+  if (refresh || !discoveredModels[provider]) {
     try {
-      const data = await postJSON(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-        { "x-goog-api-key": key },
-        {
-          system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents: messages.map((m) => ({
-            role: m.role === "assistant" ? "model" : "user",
-            parts: [{ text: m.text }],
-          })),
-          generationConfig,
-        }
-      );
-      const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
-      if (!text) {
-        const reason = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason;
-        throw new ApiError(reason ? `Răspuns blocat (${reason})` : "Răspuns gol", 200, "EMPTY");
-      }
-      return text;
+      discoveredModels[provider] = provider === "groq" ? await discoverGroqModels(key) : await discoverGeminiModels(key);
     } catch (err) {
-      lastErr = err;
-      if (!isModelMissing(err)) throw err;
+      // cheie greșită → oprim aici cu mesaj clar; altfel folosim lista de rezervă
+      if ([400, 401, 403].includes(err.status)) throw err;
+      discoveredModels[provider] = [];
     }
   }
-  throw lastErr;
+  const list = [saved, ...discoveredModels[provider].slice(0, 4), ...fallback].filter(Boolean);
+  return [...new Set(list)];
+}
+
+async function tryModels(provider, key, callOne) {
+  let lastErr;
+  for (const refresh of [false, true]) {
+    const models = await candidateModels(provider, key, refresh);
+    for (const model of models) {
+      try {
+        const text = await callOne(model);
+        lastModelUsed = model;
+        lsSet(`ai_model_${provider}`, model);
+        return text;
+      } catch (err) {
+        lastErr = err;
+        if (!isModelMissing(err)) throw err;
+        if (lsGet(`ai_model_${provider}`) === model) lsSet(`ai_model_${provider}`, "");
+      }
+    }
+  }
+  throw lastErr || new ApiError("Niciun model disponibil pentru această cheie", 404, "NO_MODEL");
+}
+
+function stripThinking(text) {
+  return (text || "").replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
+async function callGemini(key, messages) {
+  return tryModels("gemini", key, async (model) => {
+    const generationConfig = { temperature: 0.9, maxOutputTokens: 1024 };
+    // modelele 2.5 "gândesc" implicit — oprim asta ca răspunsul să vină repede
+    if (/^gemini-2\.5-flash/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+
+    const data = await postJSON(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      { "x-goog-api-key": key },
+      {
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: messages.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.text }],
+        })),
+        generationConfig,
+      }
+    );
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const text = stripThinking(parts.filter((p) => !p.thought).map((p) => p.text || "").join(""));
+    if (!text) {
+      const reason = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason;
+      throw new ApiError(reason ? `Răspuns blocat (${reason})` : "Răspuns gol", 200, "EMPTY");
+    }
+    return text;
+  });
 }
 
 async function callGroq(key, messages) {
-  let lastErr;
-  for (const model of GROQ_MODELS) {
-    try {
-      const data = await postJSON(
-        "https://api.groq.com/openai/v1/chat/completions",
-        { Authorization: `Bearer ${key}` },
-        {
-          model,
-          temperature: 0.9,
-          max_tokens: 300,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            ...messages.map((m) => ({ role: m.role, content: m.text })),
-          ],
-        }
-      );
-      const text = data?.choices?.[0]?.message?.content?.trim();
-      if (!text) throw new ApiError("Răspuns gol", 200, "EMPTY");
-      return text;
-    } catch (err) {
-      lastErr = err;
-      if (!isModelMissing(err)) throw err;
-    }
-  }
-  throw lastErr;
+  return tryModels("groq", key, async (model) => {
+    const body = {
+      model,
+      temperature: 0.9,
+      max_tokens: 1024,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...messages.map((m) => ({ role: m.role, content: m.text })),
+      ],
+    };
+    // modelele care "raționează" — le cerem să gândească puțin, ca să răspundă rapid
+    if (/gpt-oss/i.test(model)) body.reasoning_effort = "low";
+    if (/qwen/i.test(model)) body.reasoning_format = "hidden";
+
+    const data = await postJSON(
+      "https://api.groq.com/openai/v1/chat/completions",
+      { Authorization: `Bearer ${key}` },
+      body
+    );
+    const text = stripThinking(data?.choices?.[0]?.message?.content);
+    if (!text) throw new ApiError("Răspuns gol", 200, "EMPTY");
+    return text;
+  });
 }
 
 async function askAI(messages, key = getApiKey(), provider = getProvider(key)) {
@@ -604,6 +707,7 @@ async function askAI(messages, key = getApiKey(), provider = getProvider(key)) {
 
 function friendlyError(err) {
   if (err.code === "NO_KEY") return NO_KEY_MESSAGE;
+  if (err.code === "NO_MODEL" || isModelMissing(err)) return "Nu găsesc niciun model AI disponibil pentru cheia asta. Încearcă o cheie nouă sau celălalt furnizor.";
   if (err.code === "TIMEOUT") return "Serverul AI doarme. Am așteptat 25 de secunde și am renunțat. Mai încearcă.";
   if (err.code === "NETWORK") return "Nu ajung la serverul AI. Verifică internetul.";
   if (err.status === 400 && /api key|API_KEY/i.test(err.message)) return "Cheia API nu e validă. Verific-o în setări.";
@@ -864,6 +968,9 @@ toggleKeyBtn.addEventListener("click", () => {
 settingsForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const key = apiKeyInput.value.trim();
+  if (key !== getApiKey()) {
+    ["gemini", "groq"].forEach((p) => { lsSet(`ai_model_${p}`, ""); delete discoveredModels[p]; });
+  }
   // salvare locală: localStorage.setItem('ai_key', cheie)
   try {
     if (key) localStorage.setItem("ai_key", key);
@@ -908,7 +1015,7 @@ testApiBtn.addEventListener("click", async () => {
   apiTestResult.className = "test-result";
   try {
     const reply = await askAI([{ role: "user", text: "Spune salut într-o propoziție scurtă." }], key, provider);
-    apiTestResult.textContent = `✓ Merge! Răspuns: „${reply.slice(0, 90)}”`;
+    apiTestResult.textContent = `✓ Merge (model: ${lastModelUsed})! Răspuns: „${reply.slice(0, 90)}”`;
     apiTestResult.className = "test-result ok";
   } catch (err) {
     apiTestResult.textContent = `✗ ${friendlyError(err)}`;
