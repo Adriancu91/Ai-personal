@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07040f">
+  <meta name="description" content="Asistent AI vocal cu un pet roboțel animat.">
+  <title>AI Personal — Pet Roboțel Vocal</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Fundal: stele + ceață neon -->
+  <div class="space" aria-hidden="true">
+    <div class="stars stars--far"></div>
+    <div class="stars stars--near"></div>
+    <div class="nebula"></div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>AI&nbsp;PERSONAL</span>
+    </div>
+    <button id="settingsBtn" class="icon-btn" type="button" aria-label="Setări API">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M4 6h16M4 12h16M4 18h16"/>
+        <circle cx="9" cy="6" r="2.2" fill="#0b0618"/>
+        <circle cx="15" cy="12" r="2.2" fill="#0b0618"/>
+        <circle cx="7" cy="18" r="2.2" fill="#0b0618"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- Scena pe care se plimbă roboțelul -->
+  <main id="stage" class="stage">
+    <div id="pet" class="pet" title="Boop!">
+      <div class="pet-float">
+        <div class="pet-antenna">
+          <span class="antenna-bulb"></span>
+          <span class="antenna-stick"></span>
+        </div>
+
+        <div class="pet-head">
+          <span class="pet-ear pet-ear--left"></span>
+          <span class="pet-ear pet-ear--right"></span>
+          <div class="pet-face">
+            <div class="pet-eye pet-eye--left"><span class="pupil"></span></div>
+            <div class="pet-eye pet-eye--right"><span class="pupil"></span></div>
+            <span class="pet-cheek pet-cheek--left"></span>
+            <span class="pet-cheek pet-cheek--right"></span>
+            <div class="pet-mouth"></div>
+          </div>
+        </div>
+
+        <div class="pet-body">
+          <span class="pet-arm pet-arm--left"></span>
+          <span class="pet-arm pet-arm--right"></span>
+          <div class="pet-core"></div>
+        </div>
+
+        <!-- Propulsor (SVG inline) -->
+        <svg class="pet-thruster" viewBox="0 0 40 46" aria-hidden="true">
+          <defs>
+            <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#7df9ff" stop-opacity="0.95"/>
+              <stop offset="0.5" stop-color="#39ff9f" stop-opacity="0.6"/>
+              <stop offset="1" stop-color="#39ff9f" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M8 0 Q20 52 32 0 Z" fill="url(#flame)"/>
+        </svg>
+      </div>
+      <div class="pet-shadow"></div>
+    </div>
+  </main>
+
+  <!-- Chat glassmorphism: doar ultima replică a fiecăruia -->
+  <section class="chat glass" aria-live="polite">
+    <div class="bubble bubble--user">
+      <span class="bubble-label">Tu</span>
+      <p id="userText" class="bubble-text muted">Încă n-ai zis nimic…</p>
+    </div>
+    <div class="bubble bubble--ai">
+      <span class="bubble-label">Roboțel</span>
+      <p id="aiText" class="bubble-text">Salut! Apasă butonul neon și vorbește cu mine. Promit să fiu doar puțin sarcastic.</p>
+    </div>
+  </section>
+
+  <!-- Waveform + microfon -->
+  <section class="controls">
+    <canvas id="waveform" class="waveform" aria-hidden="true"></canvas>
+    <p id="status" class="status">Gata de conversație</p>
+    <button id="micBtn" class="mic-btn" type="button" aria-label="Pornește microfonul">
+      <span class="mic-ring"></span>
+      <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="9" y="2.5" width="6" height="12" rx="3" fill="currentColor"/>
+        <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <svg class="stop-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor"/>
+      </svg>
+    </button>
+  </section>
+
+  <!-- Setări: cheia API rămâne doar în browserul tău (localStorage), nu în cod -->
+  <dialog id="settings" class="settings glass">
+    <form method="dialog" id="settingsForm">
+      <h2>Setări creier AI</h2>
+
+      <label for="providerSelect">Furnizor (gratuit)</label>
+      <select id="providerSelect">
+        <option value="gemini">Google Gemini Flash</option>
+        <option value="groq">Groq (Llama)</option>
+      </select>
+
+      <label for="apiKeyInput">Cheie API</label>
+      <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Lipește cheia aici">
+
+      <p class="hint">
+        Cheia se salvează doar în acest browser. Gemini: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> ·
+        Groq: <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>
+      </p>
+
+      <label for="voiceSelect">Voce</label>
+      <select id="voiceSelect"></select>
+
+      <div class="settings-actions">
+        <button type="button" id="testVoiceBtn" class="ghost-btn">Testează vocea</button>
+        <button type="submit" id="saveSettingsBtn" class="neon-btn">Salvează</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
