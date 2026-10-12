@@ -10,7 +10,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <!-- ?v=... forțează browserul să ia versiunea nouă, nu una veche din cache -->
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <!-- Fundal: stele + ceață neon -->
@@ -25,12 +26,11 @@
       <span class="brand-dot"></span>
       <span>AI&nbsp;PERSONAL</span>
     </div>
-    <button id="settingsBtn" class="icon-btn" type="button" aria-label="Setări API">
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <path d="M4 6h16M4 12h16M4 18h16"/>
-        <circle cx="9" cy="6" r="2.2" fill="#0b0618"/>
-        <circle cx="15" cy="12" r="2.2" fill="#0b0618"/>
-        <circle cx="7" cy="18" r="2.2" fill="#0b0618"/>
+    <!-- Rotița de setări -->
+    <button id="settingsBtn" class="icon-btn" type="button" aria-label="Setări (cheie API și voce)">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
       </svg>
     </button>
   </header>
@@ -106,35 +106,69 @@
     </button>
   </section>
 
-  <!-- Setări: cheia API rămâne doar în browserul tău (localStorage), nu în cod -->
-  <dialog id="settings" class="settings glass">
-    <form method="dialog" id="settingsForm">
-      <h2>Setări creier AI</h2>
+  <!-- ===== Modal setări (glassmorphism) ===== -->
+  <div id="settingsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <form id="settingsForm" class="modal-card glass" autocomplete="off">
+      <button type="button" class="modal-x" data-close aria-label="Închide">×</button>
+      <h2 id="settingsTitle">Setări creier AI</h2>
 
-      <label for="providerSelect">Furnizor (gratuit)</label>
+      <label for="apiKeyInput">Cheie API (Gemini sau Groq)</label>
+      <div class="key-row">
+        <input id="apiKeyInput" type="password" spellcheck="false" autocapitalize="off" placeholder="AIza…  sau  gsk_…">
+        <button type="button" id="toggleKeyBtn" class="ghost-btn small" aria-label="Arată cheia">👁</button>
+      </div>
+
+      <label for="providerSelect">Furnizor</label>
       <select id="providerSelect">
+        <option value="auto">Automat (după cheie)</option>
         <option value="gemini">Google Gemini Flash</option>
         <option value="groq">Groq (Llama)</option>
       </select>
 
-      <label for="apiKeyInput">Cheie API</label>
-      <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Lipește cheia aici">
-
       <p class="hint">
-        Cheia se salvează doar în acest browser. Gemini: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> ·
-        Groq: <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>
+        Cheia se salvează doar în acest browser, nu ajunge pe GitHub.<br>
+        Gratuit: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">cheie Gemini</a> ·
+        <a href="https://console.groq.com/keys" target="_blank" rel="noopener">cheie Groq</a>
       </p>
+
+      <div class="settings-actions split">
+        <button type="button" id="testApiBtn" class="ghost-btn">Testează conexiunea</button>
+        <button type="button" id="clearKeyBtn" class="ghost-btn danger">Șterge cheia</button>
+      </div>
+      <p id="apiTestResult" class="test-result" aria-live="polite"></p>
 
       <label for="voiceSelect">Voce</label>
       <select id="voiceSelect"></select>
-
       <div class="settings-actions">
         <button type="button" id="testVoiceBtn" class="ghost-btn">Testează vocea</button>
-        <button type="submit" id="saveSettingsBtn" class="neon-btn">Salvează</button>
+        <button type="submit" class="neon-btn">Salvează</button>
       </div>
     </form>
-  </dialog>
+  </div>
 
-  <script src="app.js"></script>
+  <!-- ===== Ajutor permisiune microfon ===== -->
+  <div id="micHelp" class="modal" role="dialog" aria-modal="true" aria-labelledby="micHelpTitle" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card glass">
+      <button type="button" class="modal-x" data-close aria-label="Închide">×</button>
+      <h2 id="micHelpTitle">Am nevoie de microfon 🎙️</h2>
+      <p id="micHelpReason" class="hint"></p>
+      <ol class="steps">
+        <li>Apasă pe <b>lacătul</b> (sau iconița de setări) din stânga adresei, sus în browser.</li>
+        <li>La <b>Microfon</b>, alege <b>Permite</b> / <b>Allow</b>.</li>
+        <li><b>Reîncarcă pagina</b> și apasă din nou butonul neon.</li>
+      </ol>
+      <p class="hint">
+        Pe telefon: Setări telefon → Aplicații → Chrome → Permisiuni → Microfon → Permite.<br>
+        Recunoașterea vocală merge în <b>Chrome</b> și <b>Edge</b> (nu în Firefox). Dacă ai deschis linkul din WhatsApp/Facebook, deschide-l în Chrome.
+      </p>
+      <div class="settings-actions">
+        <button type="button" class="neon-btn" data-close>Am înțeles</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=3"></script>
 </body>
 </html>
